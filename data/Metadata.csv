@@ -1,0 +1,20 @@
+sample_id,condition,timepoint,region ,replicate
+,,,,
+GSM9788620,Intact,Limb,Diaphysis,1
+GSM9788621,Intact,Limb,Diaphysis,2
+GSM9788622,Intact,Limb,Diaphysis,3
+GSM9788623,Intact,Limb,Epiphysis,1
+GSM9788624,Intact,Limb,Epiphysis,2
+GSM9788625,Intact,Limb,Epiphysis,3
+GSM9788626,3dpa,Regeneration,Diaphysis,1
+GSM9788627,3dpa,Regeneration,Diaphysis,2
+GSM9788628,3dpa,Regeneration,Diaphysis,3
+GSM9788629,5dpa,Regeneration,Diaphysis,1
+GSM9788630,5dpa,Regeneration,Diaphysis,2
+GSM9788631,5dpa,Regeneration,Diaphysis,3
+GSM9788632,3dpa,Regeneration,Epiphysis,1
+GSM9788633,3dpa,Regeneration,Epiphysis,2
+GSM9788634,3dpa,Regeneration,Epiphysis,3
+GSM9788635,5dpa,Regeneration,Epiphysis,1
+GSM9788636,5dpa,Regeneration,Epiphysis,2
+GSM9788637,5dpa,Regeneration,Epiphysis,3
