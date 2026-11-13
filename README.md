@@ -1,15 +1,15 @@
 # ReForm_axolotl - An RNA analysis 
 
-It is an interactive R shiny application for the exploration of RNA-seq data and limb regeneration of axolotl.
+It is an interactive R shiny application for the exploration of RNA-seq data and limb regeneration of axolotl 🧬.
 
-## Features
+## ✨Features
 - Differential expression matrix
 - Gene mapping
 - Gene Ontology
 - KEGG
 - Pathway using Reactome
 
-## Candidate Genes 
+## 🧪Candidate Genes 
 1. FLRT3
 2. MDK
 3. MMP11
@@ -17,8 +17,8 @@ It is an interactive R shiny application for the exploration of RNA-seq data and
 5. TGFB2
 6. VTN
 
-## Language and Libraries
+## 💻 Language and Libraries
 R | Shiny | DESeq2 | Plotly
 
-## WebApp
+##🌐 WebApp
 Created an interactive web application : https://sandhyae.shinyapps.io/rna_analysis/
