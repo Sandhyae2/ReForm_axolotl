@@ -20,5 +20,5 @@ It is an interactive R shiny application for the exploration of RNA-seq data and
 ## 💻 Language and Libraries
 R | Shiny | DESeq2 | Plotly
 
-##🌐 WebApp
+## 🌐 WebApp
 Created an interactive web application : https://sandhyae.shinyapps.io/rna_analysis/
