@@ -1,6 +1,6 @@
-# ReForm_axolotl - An RNA analysis 
+# ReForm_axolotl - An RNA analysis 🧬
 
-It is an interactive R shiny application for the exploration of RNA-seq data and limb regeneration of axolotl 🧬.
+It is an interactive R shiny application for the exploration of RNA-seq data and limb regeneration of axolotl.
 
 ## ✨Features
 - Differential expression matrix
