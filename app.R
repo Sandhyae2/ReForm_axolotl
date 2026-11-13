@@ -2615,222 +2615,9 @@ server <- function(input, output, session) {
   )
 
 
-  # LOAD THE NCBI GENE-LEVEL COUNT MATRIX FOR THE EXISTING VOLCANO-PLOT ANALYSIS
-  # Sample columns are matched to metadata by their sample labels, not row order.
-
-  counts_file <- "GSE334432_Processed-Data-Gene-Counts.txt.gz"
-  sample_analysis <- NULL
-  sample_analysis_error <- NULL
-
-  if (!file.exists(counts_file)) {
-
-    sample_analysis_error <- paste(
-      "The NCBI gene-count file was not found:",
-      counts_file,
-      "Place it in the same folder as app.R."
-    )
-
-  } else if (!requireNamespace("DESeq2", quietly = TRUE)) {
-
-    sample_analysis_error <- paste(
-      "The DESeq2 R package is required for the volcano-plot re-analysis.",
-      "Install it with:",
-      "if (!requireNamespace('BiocManager', quietly = TRUE)) install.packages('BiocManager');",
-      "BiocManager::install('DESeq2')"
-    )
-
-  } else if (!requireNamespace("SummarizedExperiment", quietly = TRUE) ||
-             !requireNamespace("ggplot2", quietly = TRUE)) {
-
-    sample_analysis_error <- paste(
-      "Required plotting/assay packages are missing. Install them with:",
-      "BiocManager::install('SummarizedExperiment');",
-      "install.packages('ggplot2')"
-    )
-
-  } else {
-
-    analysis_attempt <- tryCatch({
-
-      if (!is.data.frame(metadata) || nrow(metadata) != 18) {
-        stop("Metadata1.csv must contain exactly 18 sample rows.")
-      }
-
-      # The supplied metadata has a trailing space in the region column name.
-      # Identify the column after trimming names without changing the shared metadata.
-      metadata_column_names <- trimws(names(metadata))
-      region_column_index <- which(metadata_column_names == "region")
-      if (length(region_column_index) != 1) {
-        stop("Metadata1.csv must contain exactly one 'region' column.")
-      }
-      region_values <- trimws(as.character(metadata[[region_column_index]]))
-
-      required_metadata_columns <- c("sample_id", "condition", "replicate")
-      missing_metadata_columns <- setdiff(required_metadata_columns, names(metadata))
-      if (length(missing_metadata_columns) > 0) {
-        stop(paste(
-          "Metadata1.csv is missing required column(s):",
-          paste(missing_metadata_columns, collapse = ", ")
-        ))
-      }
-
-      metadata_for_deseq <- data.frame(
-        sample_id = trimws(as.character(metadata$sample_id)),
-        condition = trimws(as.character(metadata$condition)),
-        region = region_values,
-        replicate = trimws(as.character(metadata$replicate)),
-        stringsAsFactors = FALSE
-      )
-
-      if (anyNA(metadata_for_deseq) ||
-          any(!nzchar(metadata_for_deseq$sample_id)) ||
-          anyDuplicated(metadata_for_deseq$sample_id)) {
-        stop("Metadata1.csv contains missing or duplicated sample identifiers/annotations.")
-      }
-
-      allowed_conditions <- c("Intact", "3dpa", "5dpa")
-      allowed_regions <- c("Diaphysis", "Epiphysis")
-      if (any(!metadata_for_deseq$condition %in% allowed_conditions) ||
-          any(!metadata_for_deseq$region %in% allowed_regions)) {
-        stop("Metadata1.csv contains an unexpected condition or tissue-region label.")
-      }
-
-      # Read the tab-delimited NCBI file. Use an actual tab delimiter (not the
-      # two-character string backslash+t).
-      count_table <- utils::read.delim(
-        counts_file,
-        header = TRUE,
-        sep = "\t",
-        stringsAsFactors = FALSE,
-        check.names = FALSE,
-        quote = "",
-        comment.char = "",
-        row.names = NULL
-      )
-
-      if (ncol(count_table) != 19) {
-        stop(paste(
-          "Expected one gene-ID column and 18 sample columns in the NCBI count file;",
-          "found", ncol(count_table) - 1, "sample columns."
-        ))
-      }
-
-      observed_sample_labels <- sub(
-        "_L[0-9]+_Track-.*$", "", names(count_table)[-1]
-      )
-
-      expected_sample_labels <- vapply(seq_len(nrow(metadata_for_deseq)), function(i) {
-        condition_value <- metadata_for_deseq$condition[[i]]
-        region_value <- metadata_for_deseq$region[[i]]
-        replicate_value <- metadata_for_deseq$replicate[[i]]
-
-        if (identical(condition_value, "Intact")) {
-          paste0("Intact", replicate_value, "_", region_value)
-        } else {
-          paste0(condition_value, "_", region_value, "_", replicate_value)
-        }
-      }, character(1))
-
-      if (anyDuplicated(observed_sample_labels)) {
-        stop("The NCBI count matrix contains duplicated sample labels.")
-      }
-
-      sample_column_order <- match(expected_sample_labels, observed_sample_labels)
-      if (anyNA(sample_column_order)) {
-        missing_samples <- expected_sample_labels[is.na(sample_column_order)]
-        stop(paste(
-          "The following metadata samples were not found in the NCBI count matrix:",
-          paste(missing_samples, collapse = ", ")
-        ))
-      }
-
-      # Reorder count columns to exactly match Metadata1.csv.
-      count_table <- count_table[, c(1, sample_column_order + 1), drop = FALSE]
-
-      gene_ids <- trimws(as.character(count_table[[1]]))
-      if (anyNA(gene_ids) || any(!nzchar(gene_ids)) || anyDuplicated(gene_ids)) {
-        stop("The NCBI count matrix contains missing, blank, or duplicated gene IDs.")
-      }
-
-      numeric_counts <- lapply(count_table[-1], function(x) {
-        suppressWarnings(as.numeric(as.character(x)))
-      })
-
-      if (any(vapply(numeric_counts, function(x) anyNA(x), logical(1)))) {
-        stop("One or more NCBI sample columns contain non-numeric or missing count values.")
-      }
-
-      count_matrix <- do.call(cbind, numeric_counts)
-      storage.mode(count_matrix) <- "double"
-
-      if (any(!is.finite(count_matrix)) || any(count_matrix < 0) ||
-          any(count_matrix != floor(count_matrix))) {
-        stop("The NCBI gene-count matrix must contain finite, non-negative integer counts.")
-      }
-
-      rownames(count_matrix) <- gene_ids
-      colnames(count_matrix) <- metadata_for_deseq$sample_id
-      storage.mode(count_matrix) <- "integer"
-
-      metadata_for_deseq$group <- factor(
-        paste(metadata_for_deseq$condition, metadata_for_deseq$region, sep = "_"),
-        levels = c(
-          "Intact_Diaphysis", "3dpa_Diaphysis", "5dpa_Diaphysis",
-          "Intact_Epiphysis", "3dpa_Epiphysis", "5dpa_Epiphysis"
-        )
-      )
-      rownames(metadata_for_deseq) <- metadata_for_deseq$sample_id
-
-      if (anyNA(metadata_for_deseq$group)) {
-        stop("One or more samples could not be assigned to the six experimental groups.")
-      }
-
-      group_sizes <- table(metadata_for_deseq$group)
-      if (length(group_sizes) != 6 || any(group_sizes != 3)) {
-        stop("Expected exactly three replicates in each of the six experimental groups.")
-      }
-
-      # Retain genes with at least 10 total reads across the 18 samples.
-      keep_genes <- rowSums(count_matrix) >= 10
-      count_matrix <- count_matrix[keep_genes, , drop = FALSE]
-      if (nrow(count_matrix) < 2) {
-        stop("Fewer than two genes remain after the minimum-count filter.")
-      }
-
-      dds <- DESeq2::DESeqDataSetFromMatrix(
-        countData = count_matrix,
-        colData = metadata_for_deseq,
-        design = ~ group
-      )
-      dds <- DESeq2::DESeq(dds, quiet = TRUE)
-
-      vsd <- DESeq2::vst(
-        dds,
-        blind = TRUE,
-        nsub = min(1000L, nrow(dds))
-      )
-
-      list(ok = TRUE, value = list(
-        dds = dds,
-        vsd = vsd,
-        metadata = metadata_for_deseq,
-        gene_count = nrow(count_matrix),
-        sample_count = ncol(count_matrix)
-      ))
-
-    }, error = function(e) {
-      list(ok = FALSE, message = conditionMessage(e))
-    })
-
-    if (isTRUE(analysis_attempt$ok)) {
-      sample_analysis <- analysis_attempt$value
-      sample_analysis_error <- NULL
-    } else {
-      sample_analysis <- NULL
-      sample_analysis_error <- analysis_attempt$message
-      message("DESeq2 sample-analysis preparation failed: ", sample_analysis_error)
-    }
-  }
+  # VOLCANO PLOT RESULTS ARE READ FROM THE SIX SUPPLIED DESeq2 CSV FILES.
+  # Do not rebuild the full count matrix / DESeq2 model at session startup:
+  # the Volcano plot and its table use the supplied comparison-result files.
 
 
   # LOAD SIGNIFICANT DESeq2 RESULTS FOR THE 3 dpa vs 5 dpa COMPARISON
@@ -3080,14 +2867,14 @@ server <- function(input, output, session) {
   }
 
 
-  # PCA and correlation are supplied standalone-analysis results. The volcano
-  # plot below retains its existing DESeq2/count-matrix workflow.
+  # PCA and correlation are supplied standalone-analysis results. The Volcano
+  # plot uses the supplied precomputed DESeq2 comparison-result files.
   output$sample_analysis_status <- renderUI({
     div(
       class = "focus-panel",
       style = "margin: 12px 0;",
       tags$strong("PCA and sample-correlation results loaded"),
-      p("The supplied 18-sample PCA coordinates and Pearson correlation matrix are displayed directly. The volcano plot remains a separate DESeq2 re-analysis.", style = "margin:6px 0 0;")
+      p("PCA and sample-correlation results are displayed from the supplied analysis outputs. The Volcano plot uses the supplied DESeq2 comparison-result files.", style = "margin:6px 0 0;")
     )
   })
 
@@ -3153,22 +2940,23 @@ server <- function(input, output, session) {
   })
 
   # ==========================================================
-  # COMPLETE VOLCANO PLOTS FOR ALL SIX DESeq2 COMPARISONS
-  # Nonsignificant genes are retained in each contrast result.
+  # VOLCANO PLOT: CACHED, LIGHTWEIGHT COMPARISON DATA
+  # Read and prepare each selected comparison once per session.
+  # Keep gene-level hover values as numeric customdata rather than
+  # constructing a long HTML string for every gene.
   # ==========================================================
 
-  output$deseq_volcano_plot <- plotly::renderPlotly({
+  volcano_file_lookup <- c(
+    "3dpa_Diaphysis_vs_Intact_Diaphysis" = "3dpa_Diaphysis_vs_Intact_Diaphysis_DESeq2_Results.csv",
+    "3dpa_Epiphysis_vs_Intact_Epiphysis" = "3dpa_Epiphysis_vs_Intact_Epiphysis_DESeq2_Results.csv",
+    "5dpa_Diaphysis_vs_Intact_Diaphysis" = "5dpa_Diaphysis_vs_Intact_Diaphysis_DESeq2_Results.csv",
+    "5dpa_Epiphysis_vs_Intact_Epiphysis" = "5dpa_Epiphysis_vs_Intact_Epiphysis_DESeq2_Results.csv",
+    "5dpa_vs_3dpa_Diaphysis" = "5dpa_vs_3dpa_Diaphysis_DESeq2_Results.csv",
+    "5dpa_vs_3dpa_Epiphysis" = "5dpa_vs_3dpa_Epiphysis_DESeq2_Results.csv"
+  )
 
+  volcano_data_reactive <- shiny::reactive({
     req(input$volcano_comparison)
-
-    volcano_file_lookup <- c(
-      "3dpa_Diaphysis_vs_Intact_Diaphysis" = "3dpa_Diaphysis_vs_Intact_Diaphysis_DESeq2_Results.csv",
-      "3dpa_Epiphysis_vs_Intact_Epiphysis" = "3dpa_Epiphysis_vs_Intact_Epiphysis_DESeq2_Results.csv",
-      "5dpa_Diaphysis_vs_Intact_Diaphysis" = "5dpa_Diaphysis_vs_Intact_Diaphysis_DESeq2_Results.csv",
-      "5dpa_Epiphysis_vs_Intact_Epiphysis" = "5dpa_Epiphysis_vs_Intact_Epiphysis_DESeq2_Results.csv",
-      "5dpa_vs_3dpa_Diaphysis" = "5dpa_vs_3dpa_Diaphysis_DESeq2_Results.csv",
-      "5dpa_vs_3dpa_Epiphysis" = "5dpa_vs_3dpa_Epiphysis_DESeq2_Results.csv"
-    )
 
     selected_file <- unname(volcano_file_lookup[input$volcano_comparison])
 
@@ -3186,7 +2974,20 @@ server <- function(input, output, session) {
       )
     )
 
-    volcano_data <- read_csv_safe(selected_file)
+    # Use fread when data.table is available; retain a base-R fallback so
+    # the app does not require an additional package to run.
+    volcano_data <- if (requireNamespace("data.table", quietly = TRUE)) {
+      as.data.frame(
+        data.table::fread(
+          selected_file,
+          data.table = FALSE,
+          showProgress = FALSE
+        ),
+        check.names = FALSE
+      )
+    } else {
+      read_csv_safe(selected_file)
+    }
 
     required_volcano_columns <- c(
       "gene_id", "log2FoldChange", "padj", "regulation"
@@ -3219,11 +3020,10 @@ server <- function(input, output, session) {
         as.numeric(volcano_data$neglog10_padj)
       )
     } else {
-      volcano_data$neglog10_padj <- ifelse(
-        is.na(volcano_data$padj),
-        0,
-        -log10(pmax(volcano_data$padj, .Machine$double.xmin))
+      volcano_data$neglog10_padj <- -log10(
+        pmax(volcano_data$padj, .Machine$double.xmin, na.rm = FALSE)
       )
+      volcano_data$neglog10_padj[is.na(volcano_data$padj)] <- 0
     }
 
     volcano_data$regulation <- trimws(as.character(volcano_data$regulation))
@@ -3252,67 +3052,82 @@ server <- function(input, output, session) {
       levels = c("Not significant", "Upregulated", "Downregulated")
     )
 
-    hover_columns <- intersect(
-      c("baseMean", "pvalue", "padj"),
-      names(volcano_data)
+    volcano_data
+  })
+
+  # Cache each comparison after its first read/preparation. Switching back
+  # to a previously viewed comparison therefore does not parse the CSV again.
+  volcano_data_reactive <- shiny::bindCache(
+    volcano_data_reactive,
+    input$volcano_comparison,
+    cache = "session"
+  )
+
+  output$deseq_volcano_plot <- plotly::renderPlotly({
+    volcano_data <- volcano_data_reactive()
+
+    regulation_colors <- c(
+      "Not significant" = "#B8B0B0",
+      "Upregulated" = "#C45A62",
+      "Downregulated" = "#4C83A8"
     )
 
-    volcano_data$hover_text <- paste0(
-      "<b>", volcano_data$gene_id, "</b>",
-      "<br>Expression status: ", as.character(volcano_data$regulation),
-      "<br>log2 fold change: ", signif(volcano_data$log2FoldChange, 4),
-      "<br>-log10 adjusted p-value: ",
-      signif(volcano_data$neglog10_padj, 4)
-    )
+    # Add only three compact traces. Numeric hover statistics are sent as
+    # customdata, avoiding one separately-built HTML string per gene.
+    volcano_plot <- plotly::plot_ly()
 
-    if ("baseMean" %in% hover_columns) {
-      volcano_data$hover_text <- paste0(
-        volcano_data$hover_text,
-        "<br>Base mean: ", signif(as.numeric(volcano_data$baseMean), 4)
-      )
-    }
-    if ("pvalue" %in% hover_columns) {
-      volcano_data$hover_text <- paste0(
-        volcano_data$hover_text,
-        "<br>p-value: ", signif(as.numeric(volcano_data$pvalue), 4)
-      )
-    }
-    if ("padj" %in% hover_columns) {
-      volcano_data$hover_text <- paste0(
-        volcano_data$hover_text,
-        "<br>Adjusted p-value: ",
-        ifelse(
-          is.na(volcano_data$padj),
-          "NA",
-          format(
-            signif(volcano_data$padj, 4),
-            scientific = TRUE,
-            trim = TRUE
-          )
-        )
-      )
-    }
+    for (status in names(regulation_colors)) {
+      group_data <- volcano_data[
+        volcano_data$regulation == status,
+        ,
+        drop = FALSE
+      ]
 
-    volcano_plot <- plotly::plot_ly(
-      data = volcano_data,
-      x = ~log2FoldChange,
-      y = ~neglog10_padj,
-      type = "scatter",
-      mode = "markers",
-      color = ~regulation,
-      colors = c(
-        "Not significant" = "#B8B0B0",
-        "Upregulated" = "#C45A62",
-        "Downregulated" = "#4C83A8"
-      ),
-      text = ~hover_text,
-      hovertemplate = "%{text}<extra></extra>",
-      marker = list(
-        size = 6,
-        opacity = 0.72,
-        line = list(width = 0)
+      if (nrow(group_data) == 0) next
+
+      hover_values <- cbind(
+        baseMean = if ("baseMean" %in% names(group_data)) {
+          suppressWarnings(as.numeric(group_data$baseMean))
+        } else {
+          rep(NA_real_, nrow(group_data))
+        },
+        pvalue = if ("pvalue" %in% names(group_data)) {
+          suppressWarnings(as.numeric(group_data$pvalue))
+        } else {
+          rep(NA_real_, nrow(group_data))
+        },
+        padj = as.numeric(group_data$padj)
       )
-    )
+
+      trace_hover <- paste0(
+        "<b>%{text}</b>",
+        "<br>Expression status: ", status,
+        "<br>log2 fold change: %{x:.4f}",
+        "<br>-log10 adjusted p-value: %{y:.4f}",
+        "<br>Base mean: %{customdata[0]:.4g}",
+        "<br>p-value: %{customdata[1]:.3e}",
+        "<br>Adjusted p-value: %{customdata[2]:.3e}",
+        "<extra></extra>"
+      )
+
+      volcano_plot <- plotly::add_trace(
+        volcano_plot,
+        x = group_data$log2FoldChange,
+        y = group_data$neglog10_padj,
+        text = as.character(group_data$gene_id),
+        customdata = hover_values,
+        type = "scattergl",
+        mode = "markers",
+        name = status,
+        marker = list(
+          color = unname(regulation_colors[status]),
+          size = 6,
+          opacity = 0.72
+        ),
+        hovertemplate = trace_hover,
+        showlegend = TRUE
+      )
+    }
 
     volcano_plot <- plotly::layout(
       volcano_plot,
@@ -3382,55 +3197,53 @@ server <- function(input, output, session) {
   rownames = FALSE, width = "100%")
 
 
+  # Keep the large gene-level HTML table out of the initial Volcano view.
+  # It is created only when the user explicitly requests it, so the browser
+  # can render the interactive plot without also building 27k+ table rows.
+  output$deseq_volcano_table_ui <- renderUI({
+    if (is.null(input$show_volcano_table) || input$show_volcano_table < 1) {
+      return(NULL)
+    }
+    tableOutput("deseq_volcano_table")
+  })
+
   output$deseq_volcano_table <- renderTable({
+    req(input$show_volcano_table > 0)
+    result_table <- volcano_data_reactive()
+
+    table_columns <- intersect(
+      c(
+        "gene_id", "baseMean", "log2FoldChange", "lfcSE",
+        "stat", "pvalue", "padj", "regulation"
+      ),
+      names(result_table)
+    )
+
     shiny::validate(
       shiny::need(
-        !is.null(sample_analysis),
-        if (is.null(sample_analysis_error)) {
-          "The full DESeq2 analysis could not be prepared."
-        } else {
-          sample_analysis_error
-        }
+        length(table_columns) >= 4,
+        "The selected DESeq2 file does not contain enough columns to display the results table."
       )
     )
-    req(input$volcano_comparison)
 
-    contrast_lookup <- list(
-      "3dpa_Diaphysis_vs_Intact_Diaphysis" = c("group", "3dpa_Diaphysis", "Intact_Diaphysis"),
-      "3dpa_Epiphysis_vs_Intact_Epiphysis" = c("group", "3dpa_Epiphysis", "Intact_Epiphysis"),
-      "5dpa_Diaphysis_vs_Intact_Diaphysis" = c("group", "5dpa_Diaphysis", "Intact_Diaphysis"),
-      "5dpa_Epiphysis_vs_Intact_Epiphysis" = c("group", "5dpa_Epiphysis", "Intact_Epiphysis"),
-      "5dpa_vs_3dpa_Diaphysis" = c("group", "5dpa_Diaphysis", "3dpa_Diaphysis"),
-      "5dpa_vs_3dpa_Epiphysis" = c("group", "5dpa_Epiphysis", "3dpa_Epiphysis")
+    result_table <- result_table[, table_columns, drop = FALSE]
+    display_names <- c(
+      gene_id = "Gene ID",
+      baseMean = "Base mean",
+      log2FoldChange = "Log2 fold change",
+      lfcSE = "LFC standard error",
+      stat = "Wald statistic",
+      pvalue = "p-value",
+      padj = "Adjusted p-value",
+      regulation = "Regulation"
     )
-    selected_contrast <- contrast_lookup[[input$volcano_comparison]]
-    shiny::validate(shiny::need(!is.null(selected_contrast), "Select one of the six supported DESeq2 comparisons."))
-
-    result_table <- as.data.frame(DESeq2::results(
-      sample_analysis$dds, contrast = selected_contrast
-    ))
-    result_table$gene_id <- rownames(result_table)
-    result_table <- result_table[!is.na(result_table$log2FoldChange), , drop = FALSE]
-    shiny::validate(shiny::need(nrow(result_table) > 0, "No testable genes were returned for this comparison."))
-
-    result_table$regulation <- ifelse(
-      !is.na(result_table$padj) & result_table$padj < 0.05 & result_table$log2FoldChange >= 1,
-      "Upregulated",
-      ifelse(
-        !is.na(result_table$padj) & result_table$padj < 0.05 & result_table$log2FoldChange <= -1,
-        "Downregulated", "Not significant"
-      )
-    )
-    result_table <- result_table[, c(
-      "gene_id", "baseMean", "log2FoldChange", "lfcSE", "stat", "pvalue", "padj", "regulation"
-    )]
-    names(result_table) <- c(
-      "Gene ID", "Base mean", "Log2 fold change", "LFC standard error",
-      "Wald statistic", "p-value", "Adjusted p-value", "Regulation"
-    )
+    names(result_table) <- unname(display_names[table_columns])
     result_table
   }, striped = TRUE, bordered = TRUE, hover = TRUE, spacing = "s",
   rownames = FALSE, digits = 4, width = "100%")
+
+  # Prioritise the plot. The full results table is deferred until requested.
+  shiny::outputOptions(output, "deseq_volcano_plot", priority = 100)
 
 
   # DISPLAY METADATA TABLE
@@ -6795,9 +6608,10 @@ server <- function(input, output, session) {
                   selected = "3dpa_Diaphysis_vs_Intact_Diaphysis"
                 ),
                 plotlyOutput("deseq_volcano_plot", height = "520px"),
-                h4("Differential Expression Results Table", style = "margin-top:20px;"),
-                tableOutput("deseq_volcano_table"),
-                p("The interactive volcano plot is displayed from the supplied DESeq2 comparison-result CSV. Dashed lines mark log2 fold change = ±1 and adjusted p-value = 0.05.", style = "font-size:12px;color:#6A5E5E;line-height:1.6;margin-top:10px;")
+                
+                  
+                
+                
               )
             )
           )
