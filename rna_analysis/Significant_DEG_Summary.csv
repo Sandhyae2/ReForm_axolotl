@@ -1,0 +1,13 @@
+"Comparison","Regulation","Gene_Count"
+"3dpa_Diaphysis_vs_Intact_Diaphysis","Downregulated",4711
+"3dpa_Epiphysis_vs_Intact_Epiphysis","Downregulated",4185
+"5dpa_Diaphysis_vs_Intact_Diaphysis","Downregulated",4780
+"5dpa_Epiphysis_vs_Intact_Epiphysis","Downregulated",4846
+"5dpa_vs_3dpa_Diaphysis","Downregulated",936
+"5dpa_vs_3dpa_Epiphysis","Downregulated",869
+"3dpa_Diaphysis_vs_Intact_Diaphysis","Upregulated",4766
+"3dpa_Epiphysis_vs_Intact_Epiphysis","Upregulated",3653
+"5dpa_Diaphysis_vs_Intact_Diaphysis","Upregulated",4346
+"5dpa_Epiphysis_vs_Intact_Epiphysis","Upregulated",4396
+"5dpa_vs_3dpa_Diaphysis","Upregulated",758
+"5dpa_vs_3dpa_Epiphysis","Upregulated",644
